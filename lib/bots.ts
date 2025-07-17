@@ -12,23 +12,10 @@ export interface GenesysBot {
 
 const bots: GenesysBot[] = [
   {
-    id: 'gpt-4o',
-    name: 'OpenAI GPT-4o',
+    id: 'gpt-4.1-mini',
+    name: 'OpenAI GPT-4.1 mini',
     provider: 'OpenAI',
-    description: 'A powerful and fast multimodal model from OpenAI.',
-    versions: [
-      {
-        version: 'latest',
-        supportedLanguages: ['en-us', 'es', 'fr'],
-        intents: [{ name: 'DefaultIntent', entities: [] }],
-      },
-    ],
-  },
-  {
-    id: 'gpt-4.1',
-    name: 'OpenAI GPT-4.1',
-    provider: 'OpenAI',
-    description: 'A highly capable model for complex reasoning from OpenAI.',
+    description: 'A highly capable model from OpenAI.',
     versions: [
       {
         version: 'latest',
