@@ -141,8 +141,6 @@ To maintain a stateful conversation, the middleware uses a key-value store to ma
 
 * **Session Expiration (TTL)**: The middleware uses the `botSessionTimeout` value from the Genesys request to set a Time-to-Live (TTL) on each session entry. This automatically clears stale sessions from the store, preventing data buildup.
 
-* **Resilient Fallback**: If the application is configured to use `redis` but the necessary `KV_REST_API_URL` or `KV_REST_API_TOKEN` are not provided, it will log a warning and automatically fall back to the in-memory store. This prevents deployment failures due to missing configuration but is not suitable for production use.
-
 ## 8. Deployment and Setup
 
 ### Vercel Deployment
