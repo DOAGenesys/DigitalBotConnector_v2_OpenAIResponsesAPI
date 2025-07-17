@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     const metadata = { genesys_conversation_id: body.genesysConversationId };
 
     // Tools
-    let tools: OpenAI.Responses.ResponseCreateParams.Tool[] = [];
+    let tools: OpenAI.Responses.ResponseCreateParams['tools'] = [];
     if (config.MCP_SERVERS_CONFIG_PATH) {
       try {
         const mcpConfigPath = path.join(process.cwd(), config.MCP_SERVERS_CONFIG_PATH);
