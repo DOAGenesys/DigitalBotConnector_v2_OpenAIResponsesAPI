@@ -162,7 +162,8 @@ The middleware should be configurable via environment variables or a config.json
 | DEFAULT_OPENAI_TEMPERATURE | The default temperature if not specified. | 0.7 |
 | MCP_SERVERS_CONFIG_PATH | Path to a JSON file defining MCP servers to enable. | ./mcp_config.json |
 | SESSION_STORE_TYPE | Type of session store (memory or redis). | redis |
-| REDIS_URL | Connection URL for Redis if used for session store. | redis://localhost:6379 |
+| REDIS_URL | Connection URL for Redis if used for session store. KV_REST_API_URL var in upstash - vercel| redis://localhost:6379 |
+| REDIS_TOKEN | Upstash Redis REST token.. KV_REST_API_TOKEN var in upstash - vercel| your-redis-token |
 
 ### mcp_config.json Example
 
