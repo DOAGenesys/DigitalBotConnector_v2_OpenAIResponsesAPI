@@ -20,7 +20,7 @@ class MemoryStore implements SessionStore {
   async set(key: string, value: string, ttl?: number): Promise<void> {
     this.store.set(key, value);
     if (this.timeouts.has(key)) {
-      clearTimeout(this.timeouts.get(key));
+      clearTimeout(this.timeouts.get(key)!);
     }
     if (ttl) {
       const timeout = setTimeout(() => {
@@ -36,15 +36,12 @@ class RedisStore implements SessionStore {
   private client: Redis;
 
   constructor() {
-    if (!config.KV_REST_API_URL || !config.KV_REST_API_TOKEN) {
-      throw new Error('KV_REST_API_URL or KV_REST_API_TOKEN not set');
-    }
-    this.client = new Redis({ url: config.KV_REST_API_URL, token: config.KV_REST_API_TOKEN });
+    this.client = new Redis({ url: config.KV_REST_API_URL!, token: config.KV_REST_API_TOKEN! });
   }
 
   async get(key: string): Promise<string | undefined> {
     const value = await this.client.get(key);
-    return value as string || undefined;
+    return (value as string) || undefined;
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
@@ -61,8 +58,17 @@ let store: SessionStore;
 export function getSessionStore(): SessionStore {
   if (!store) {
     if (config.SESSION_STORE_TYPE === 'redis') {
-      store = new RedisStore();
+      if (config.KV_REST_API_URL && config.KV_REST_API_TOKEN) {
+        logger.info('Using Redis for session store.');
+        store = new RedisStore();
+      } else {
+        logger.warn(
+          'SESSION_STORE_TYPE is "redis" but KV_REST_API_URL or KV_REST_API_TOKEN are not set. Falling back to in-memory store.'
+        );
+        store = new MemoryStore();
+      }
     } else {
+      logger.info('Using in-memory store for sessions.');
       store = new MemoryStore();
     }
   }
