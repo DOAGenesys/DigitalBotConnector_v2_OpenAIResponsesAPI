@@ -44,7 +44,14 @@ export async function POST(req: NextRequest) {
     let input: OpenAI.Responses.ResponseCreateParams['input'];
     const inputMessage = body.inputMessage;
 
-    logger.debug({ message: 'Processing inputMessage', type: inputMessage.type, hasContent: !!inputMessage.content });
+    logger.debug({ message: 'Processing inputMessage', type: inputMessage.type, text: inputMessage.text, hasContent: !!inputMessage.content });
+
+    if (inputMessage.content && inputMessage.content.length > 0) {
+      logger.debug({ message: 'Message has content array', content: JSON.stringify(inputMessage.content) });
+      inputMessage.content.forEach((item, index) => {
+        logger.debug({ message: `Inspecting content item ${index}`, contentType: item.contentType, attachment: item.attachment });
+      });
+    }
 
     const attachment = inputMessage.content?.find(
       (c) => c.contentType === 'Attachment' && c.attachment?.mediaType === 'File'
@@ -72,7 +79,7 @@ export async function POST(req: NextRequest) {
       input = inputMessage.text || '';
     }
     
-    logger.debug({ message: 'Final input payload for OpenAI', input });
+    logger.debug({ message: 'Final input payload for OpenAI', input: JSON.stringify(input) });
 
     let model = config.DEFAULT_OPENAI_MODEL;
     let temperature = config.DEFAULT_OPENAI_TEMPERATURE;
@@ -102,7 +109,7 @@ export async function POST(req: NextRequest) {
         }));
         logger.debug('Loaded MCP tools', { count: tools?.length || 0 });
       } catch (err) {
-        logger.error('Failed to load MCP config', err);
+        logger.error({ msg: 'Failed to load MCP config', error: (err as Error).message });
       }
     }
 
@@ -152,7 +159,7 @@ export async function POST(req: NextRequest) {
     logger.debug({ message: 'Sending response to Genesys', response: genesysResponse });
     return NextResponse.json(genesysResponse);
   } catch (err) {
-    logger.error('Error processing message', err);
+    logger.error({ msg: 'Error processing message', error: (err as Error).message, stack: (err as Error).stack });
     const errorResponse: GenesysIncomingMessagesResponse = {
       botState: 'Failed',
       replyMessages: [],
