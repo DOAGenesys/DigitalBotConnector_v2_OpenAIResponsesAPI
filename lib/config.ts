@@ -1,6 +1,3 @@
-import fs from 'fs/promises';
-import path from 'path';
-
 interface Config {
   PORT: number;
   LOG_LEVEL: 'debug' | 'info' | 'warn' | 'error';
@@ -28,18 +25,6 @@ export function getConfig(): Config {
       KV_REST_API_URL: process.env.KV_REST_API_URL,
       KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN,
     };
-
-    // Load config.json if exists
-    (async () => {
-      try {
-        const configPath = path.join(process.cwd(), 'config.json');
-        const data = await fs.readFile(configPath, 'utf-8');
-        const jsonConfig = JSON.parse(data);
-        config = { ...config, ...jsonConfig };
-      } catch (err) {
-        // No config.json or error, use env only
-      }
-    })();
   }
   return config;
 }
