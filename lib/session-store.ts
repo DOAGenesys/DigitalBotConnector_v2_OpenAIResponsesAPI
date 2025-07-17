@@ -36,10 +36,10 @@ class RedisStore implements SessionStore {
   private client: Redis;
 
   constructor() {
-    if (!config.REDIS_URL || !config.REDIS_TOKEN) {
-      throw new Error('REDIS_URL or REDIS_TOKEN not set');
+    if (!config.KV_REST_API_URL || !config.KV_REST_API_TOKEN) {
+      throw new Error('KV_REST_API_URL or KV_REST_API_TOKEN not set');
     }
-    this.client = new Redis({ url: config.REDIS_URL, token: config.REDIS_TOKEN });
+    this.client = new Redis({ url: config.KV_REST_API_URL, token: config.KV_REST_API_TOKEN });
   }
 
   async get(key: string): Promise<string | undefined> {
