@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   logger.info('POST /botconnector/messages', { botSessionId: body.botSessionId, botId: body.botId });
 
   // Validate connection secret
-  const secret = req.headers.get('genesys-connection-secret');
+  const secret = req.headers.get('GENESYS_CONNECTION_SECRET');
   if (secret !== config.GENESYS_CONNECTION_SECRET) {
     logger.warn('Invalid connection secret');
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
