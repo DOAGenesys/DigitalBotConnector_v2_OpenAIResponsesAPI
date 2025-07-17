@@ -9,8 +9,8 @@ interface Config {
   DEFAULT_OPENAI_TEMPERATURE: number;
   MCP_SERVERS_CONFIG_PATH?: string;
   SESSION_STORE_TYPE: 'memory' | 'redis';
-  REDIS_URL?: string;
-  REDIS_TOKEN?: string;
+  KV_REST_API_URL?: string;
+  KV_REST_API_TOKEN?: string;
 }
 
 let config: Config;
@@ -25,8 +25,8 @@ export function getConfig(): Config {
       DEFAULT_OPENAI_TEMPERATURE: parseFloat(process.env.DEFAULT_OPENAI_TEMPERATURE || '0.7'),
       MCP_SERVERS_CONFIG_PATH: process.env.MCP_SERVERS_CONFIG_PATH,
       SESSION_STORE_TYPE: (process.env.SESSION_STORE_TYPE || 'memory') as Config['SESSION_STORE_TYPE'],
-      REDIS_URL: process.env.REDIS_URL,
-      REDIS_TOKEN: process.env.REDIS_TOKEN,
+      KV_REST_API_URL: process.env.KV_REST_API_URL,
+      KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN,
     };
 
     // Load config.json if exists
