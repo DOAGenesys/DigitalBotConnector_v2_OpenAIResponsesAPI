@@ -12,6 +12,8 @@ const config = getConfig();
 const openai = new OpenAI({ apiKey: '' });
 const sessionStore = getSessionStore();
 
+const SESSION_FILE_KEY_PREFIX = 'file-url:';
+
 export async function POST(req: NextRequest) {
   const body: GenesysIncomingMessagesRequest = await req.json();
   logger.info({
@@ -35,66 +37,83 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const { botSessionId, inputMessage, genesysConversationId, botId, parameters, botSessionTimeout } = body;
+    const sessionKey = botSessionId || new Date().toISOString();
+    const fileSessionKey = `${SESSION_FILE_KEY_PREFIX}${sessionKey}`;
+
     let previousResponseId: string | undefined;
-    if (body.botSessionId) {
-      previousResponseId = await sessionStore.get(body.botSessionId);
+    if (botSessionId) {
+      previousResponseId = await sessionStore.get(sessionKey);
       logger.debug(`Retrieved previousResponseId: ${previousResponseId}`);
     }
 
     let input: OpenAI.Responses.ResponseCreateParams['input'];
-    const inputMessage = body.inputMessage;
-
-    logger.debug({ message: 'Processing inputMessage', type: inputMessage.type, text: inputMessage.text, hasContent: !!inputMessage.content });
-
-    if (inputMessage.content && inputMessage.content.length > 0) {
-      logger.debug({ message: 'Message has content array', content: JSON.stringify(inputMessage.content) });
-      inputMessage.content.forEach((item, index) => {
-        logger.debug({ message: `Inspecting content item ${index}`, contentType: item.contentType, attachment: item.attachment });
-      });
-    }
-
     const attachment = inputMessage.content?.find(
       (c) => c.contentType === 'Attachment' && c.attachment?.mediaType === 'File'
     );
 
     if (attachment && attachment.attachment?.url) {
-      logger.debug({ message: 'PDF attachment found', url: attachment.attachment.url });
+      logger.debug({ message: 'File attachment received', url: attachment.attachment.url });
+      const ttl = botSessionTimeout ? botSessionTimeout * 60 : undefined;
+      await sessionStore.set(fileSessionKey, attachment.attachment.url, ttl);
+
+      const genesysResponse: GenesysIncomingMessagesResponse = {
+        botState: 'MoreData',
+        replyMessages: [{ type: 'Text', text: "I've received your document. What would you like me to do with it?" }],
+        intent: 'DefaultIntent',
+        confidence: 1.0,
+        entities: [],
+        parameters: {},
+      };
+      return NextResponse.json(genesysResponse);
+    }
+
+    const savedFileUrl = await sessionStore.get(fileSessionKey);
+    if (savedFileUrl) {
+      logger.debug({ message: 'Found saved file URL in session', url: savedFileUrl });
       input = [
         {
           role: 'user',
           content: [
-            {
-              type: 'input_file',
-              file_url: attachment.attachment.url,
-            },
-            {
-              type: 'input_text',
-              text: inputMessage.text || 'Please analyze the attached document.',
-            },
+            { type: 'input_file', file_url: savedFileUrl },
+            { type: 'input_text', text: inputMessage.text || 'Please analyze the attached document.' },
           ],
         },
       ];
+      await sessionStore.set(fileSessionKey, '', 1);
     } else {
-      logger.debug('No PDF attachment found, processing as text message.');
+      logger.debug('No saved file URL, processing as standard text message.');
       input = inputMessage.text || '';
     }
-    
+
     logger.debug({ message: 'Final input payload for OpenAI', input: JSON.stringify(input) });
+    
+    if (typeof input === 'string' && !input.trim()) {
+        const genesysResponse: GenesysIncomingMessagesResponse = {
+            botState: 'MoreData',
+            replyMessages: [],
+            intent: 'DefaultIntent',
+            confidence: 1.0,
+            entities: [],
+            parameters: {},
+        };
+        return NextResponse.json(genesysResponse);
+    }
 
     let model = config.DEFAULT_OPENAI_MODEL;
     let temperature = config.DEFAULT_OPENAI_TEMPERATURE;
-    if (body.parameters) {
-      if (body.parameters.openai_model) model = body.parameters.openai_model;
-      if (body.parameters.openai_temperature) temperature = parseFloat(body.parameters.openai_temperature);
+    if (parameters) {
+      if (parameters.openai_model) model = parameters.openai_model;
+      if (parameters.openai_temperature) temperature = parseFloat(parameters.openai_temperature);
     }
     
-    if (!body.parameters?.openai_model) {
+    if (!parameters?.openai_model) {
       const bots = getBots();
-      const bot = bots.find(b => b.id === body.botId);
+      const bot = bots.find(b => b.id === botId);
       if (bot) model = bot.id;
     }
 
-    const metadata = { genesys_conversation_id: body.genesysConversationId };
+    const metadata = { genesys_conversation_id: genesysConversationId };
 
     let tools: OpenAI.Responses.ResponseCreateParams['tools'] = [];
     if (config.MCP_SERVERS_CONFIG_PATH) {
@@ -122,9 +141,9 @@ export async function POST(req: NextRequest) {
       tools,
     }, { headers: { Authorization: `Bearer ${openaiApiKey}` } });
 
-    if (body.botSessionId && openaiResponse.id) {
-      const ttl = body.botSessionTimeout ? body.botSessionTimeout * 60 : undefined;
-      await sessionStore.set(body.botSessionId, openaiResponse.id, ttl);
+    if (botSessionId && openaiResponse.id) {
+      const ttl = botSessionTimeout ? botSessionTimeout * 60 : undefined;
+      await sessionStore.set(sessionKey, openaiResponse.id, ttl);
       logger.debug(`Stored new response ID: ${openaiResponse.id}, TTL: ${ttl}`);
     }
 
