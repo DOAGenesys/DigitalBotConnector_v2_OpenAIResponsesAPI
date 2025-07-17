@@ -208,3 +208,20 @@ Map OpenAI API errors (e.g., 4xx, 5xx status codes) to the appropriate Genesys e
 
 ### Middleware Errors
 For internal middleware errors, return a generic 500 error to Genesys and log the detailed error stack trace for debugging. The response to Genesys should include the `errorInfo` object where possible.
+
+// README.md update: Add deployment notes
+
+...
+
+## 9. Deployment
+
+This middleware is designed to be deployed on Vercel serverless functions using Next.js API routes.
+
+- Set environment variables in Vercel dashboard.
+- For Redis, use Upstash or similar, set REDIS_URL and SESSION_STORE_TYPE=redis.
+- Deploy via git push to Vercel.
+
+For local development, use `npm run dev`.
+
+...
+
