@@ -5,9 +5,11 @@ import logger from '@/lib/logger';
 import { getSessionStore } from '@/lib/session-store';
 import { GenesysIncomingMessagesRequest, GenesysIncomingMessagesResponse, GenesysReplyMessage, GenesysBotState, GenesysErrorInfo } from '@/types/genesys';
 import { getBots } from '@/lib/bots';
+import fs from 'fs/promises';
+import path from 'path';
 
 const config = getConfig();
-const openai = new OpenAI({ apiKey: '' }); // Key set dynamically
+const openai = new OpenAI({ apiKey: '' });
 const sessionStore = getSessionStore();
 
 export async function POST(req: NextRequest) {
@@ -88,8 +90,11 @@ export async function POST(req: NextRequest) {
     let tools: OpenAI.Responses.ResponseCreateParams.Tool[] = [];
     if (config.MCP_SERVERS_CONFIG_PATH) {
       try {
-        const mcpConfig = await import(config.MCP_SERVERS_CONFIG_PATH);
-        tools = mcpConfig.default.map((t: any) => ({
+        const mcpConfigPath = path.join(process.cwd(), config.MCP_SERVERS_CONFIG_PATH);
+        const mcpConfigFile = await fs.readFile(mcpConfigPath, 'utf-8');
+        const mcpConfigJson = JSON.parse(mcpConfigFile);
+
+        tools = mcpConfigJson.map((t: any) => ({
           type: 'mcp' as const,
           ...t,
         }));
