@@ -16,14 +16,12 @@ export async function POST(req: NextRequest) {
   const body: GenesysIncomingMessagesRequest = await req.json();
   logger.info('POST /botconnector/messages', { botSessionId: body.botSessionId, botId: body.botId });
 
-  // Validate connection secret
   const secret = req.headers.get('GENESYS_CONNECTION_SECRET');
   if (secret !== config.GENESYS_CONNECTION_SECRET) {
     logger.warn('Invalid connection secret');
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  // Extract OpenAI API key
   const openaiApiKey = req.headers.get('OPENAI_API_KEY');
   if (!openaiApiKey) {
     logger.warn('Missing OPENAI_API_KEY');
@@ -31,20 +29,17 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Get previous response ID
     let previousResponseId: string | undefined;
     if (body.botSessionId) {
       previousResponseId = await sessionStore.get(body.botSessionId);
       logger.debug(`Retrieved previousResponseId: ${previousResponseId}`);
     }
 
-    // Transform input
     let input: OpenAI.Responses.ResponseCreateParams['input'];
     const inputMessage = body.inputMessage;
     if (inputMessage.type === 'Text') {
       input = inputMessage.text || '';
     } else if (inputMessage.type === 'Structured' && inputMessage.content) {
-      // Handle attachments
       const attachment = inputMessage.content.find(c => c.contentType === 'Attachment');
       if (attachment && attachment.attachment?.url) {
         input = [
@@ -69,24 +64,21 @@ export async function POST(req: NextRequest) {
       throw new Error('Invalid inputMessage type');
     }
 
-    // Overrides from parameters
     let model = config.DEFAULT_OPENAI_MODEL;
     let temperature = config.DEFAULT_OPENAI_TEMPERATURE;
     if (body.parameters) {
       if (body.parameters.openai_model) model = body.parameters.openai_model;
       if (body.parameters.openai_temperature) temperature = parseFloat(body.parameters.openai_temperature);
     }
-    // Default from botId if not overridden
+    
     if (!body.parameters?.openai_model) {
       const bots = getBots();
       const bot = bots.find(b => b.id === body.botId);
       if (bot) model = bot.id;
     }
 
-    // Metadata
     const metadata = { genesys_conversation_id: body.genesysConversationId };
 
-    // Tools
     let tools: OpenAI.Responses.ResponseCreateParams['tools'] = [];
     if (config.MCP_SERVERS_CONFIG_PATH) {
       try {
@@ -98,13 +90,12 @@ export async function POST(req: NextRequest) {
           type: 'mcp' as const,
           ...t,
         }));
-        logger.debug('Loaded MCP tools', { count: tools.length });
+        logger.debug('Loaded MCP tools', { count: tools?.length || 0 });
       } catch (err) {
         logger.error('Failed to load MCP config', err);
       }
     }
 
-    // Call OpenAI
     const openaiResponse = await openai.responses.create({
       model,
       input,
@@ -114,22 +105,21 @@ export async function POST(req: NextRequest) {
       tools,
     }, { headers: { Authorization: `Bearer ${openaiApiKey}` } });
 
-    // Store new response ID
     if (body.botSessionId && openaiResponse.id) {
-      const ttl = body.botSessionTimeout ? body.botSessionTimeout * 60 : undefined; // minutes to seconds
+      const ttl = body.botSessionTimeout ? body.botSessionTimeout * 60 : undefined;
       await sessionStore.set(body.botSessionId, openaiResponse.id, ttl);
       logger.debug(`Stored new response ID: ${openaiResponse.id}, TTL: ${ttl}`);
     }
 
-    // Transform response
     let botState: GenesysBotState = 'MoreData';
     let replyMessages: GenesysReplyMessage[] = [];
     let errorInfo: GenesysErrorInfo | undefined;
 
     if (openaiResponse.status === 'completed') {
-      const output = openaiResponse.output.find(o => o.type === 'message' && o.content[0]?.type === 'output_text');
-      if (output) {
-        replyMessages = [{ type: 'Text', text: (output.content[0] as any).text }];
+      const outputMessage = openaiResponse.output.find(o => o.type === 'message');
+      
+      if (outputMessage && outputMessage.content[0]?.type === 'output_text') {
+        replyMessages = [{ type: 'Text', text: outputMessage.content[0].text }];
       }
     } else if (openaiResponse.status === 'failed') {
       botState = 'Failed';
