@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server';
 import { getBots } from '@/lib/bots';
 import logger from '@/lib/logger';
 
-export async function GET(request: Request, { params }: { params: { botId: string } }) {
-  const botId = params.botId;
+// Change the function signature here
+export async function GET(request: Request, context: { params: { botId: string } }) {
+  // Access botId from the context object
+  const botId = context.params.botId;
   logger.info(`GET /botconnector/bots/${botId}`);
   const bots = getBots();
   const bot = bots.find(b => b.id === botId);
