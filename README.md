@@ -2,25 +2,23 @@
 
 ## 1. Overview
 
-This document outlines the architecture and implementation details for a middleware service that connects the Genesys Cloud Digital Bot Connector (v2) with the OpenAI Responses API. The goal is to create a secure, scalable, and configurable bridge that allows Genesys Cloud Architect flows to leverage the power of OpenAI's generative models for conversational AI.
-
-The middleware will handle session management, message transformation, security, and configuration, enabling a seamless and stateful conversation between an end-user on a Genesys messaging channel and an OpenAI model.
+This document outlines a middleware service connecting the Genesys Cloud Digital Bot Connector (v2) with the OpenAI Responses API. It creates a secure, scalable bridge for Genesys Cloud Architect flows to use OpenAI's generative models for conversational AI, handling session management, message transformation, security, and configuration.
 
 ### Key Features
 
-- **Stateless Conversation Management**: Leverages OpenAI's `previous_response_id` mapped to Genesys's `botSessionId` to maintain conversation context without storing chat history.
+* **Stateless Conversation Management**: Uses OpenAI's `previous_response_id` mapped to Genesys's `botSessionId` for context, avoiding the need to store chat history.
 
-- **Dynamic Configuration**: Uses Genesys Session Variables to control OpenAI parameters like model and temperature on a per-flow basis.
+* **Dynamic Configuration**: Leverages Genesys Session Variables to control OpenAI parameters like model and temperature.
 
-- **Secure Credential Handling**: The OpenAI API Key is passed securely from the Genesys Credential Manager via request headers, not stored in the middleware.
+* **Secure Credential Handling**: The OpenAI API Key is passed securely via request headers from the Genesys Credential Manager and is not stored in the middleware.
 
-- **File & Tool Integration**: Supports PDF file attachments and enables the use of OpenAI's powerful tools, specifically Remote MCP (Model Context Protocol) servers.
+* **File & Tool Integration**: Supports PDF attachments and OpenAI's tools, including Remote MCP (Model Context Protocol) servers.
 
-- **Production-Ready**: Includes guidelines for logging, error handling, and containerization.
+* **Production-Ready**: Includes guidelines for logging, error handling, and containerization.
 
 ## 2. Architecture
 
-The system operates on a simple, linear flow. The middleware acts as a translation layer between the two distinct APIs.
+The middleware acts as a translation layer, following a simple, linear flow between the Genesys Cloud and OpenAI APIs.
 
 ```mermaid
 sequenceDiagram
@@ -28,7 +26,7 @@ sequenceDiagram
     participant Genesys Cloud
     participant Middleware
     participant OpenAI API
-
+    
     User->>+Genesys Cloud: Sends message
     Genesys Cloud->>+Middleware: POST /botconnector/messages (with message, session info, API key)
     Middleware->>+Middleware: Transform Genesys request to OpenAI format
@@ -39,135 +37,73 @@ sequenceDiagram
     Genesys Cloud-->>-User: Displays bot response
 ```
 
-## 3. API Endpoints (Middleware Implementation)
+## 3. API Endpoints
 
-The middleware MUST implement the following endpoints to be compliant with the Genesys Digital Bot Connector specification.
+The middleware implements the following endpoints to comply with the Genesys Digital Bot Connector specification.
 
 ### GET /botconnector/bots
 
-This endpoint provides Genesys Architect with a list of available "bots". In our context, a "bot" represents a specific configuration for the OpenAI API (e.g., a specific model or a set of initial instructions). This should be configurable within the middleware.
-
-**Response Body Example:**
-
-The response must be a JSON object containing a list of bots. The `id` can be used to reference a specific OpenAI model (e.g., `gpt-4.1`). The intents and entities can be minimal, as the primary logic resides in OpenAI.
-
-```json
-{
-  "entities": [
-    {
-      "id": "gpt-4o",
-      "name": "OpenAI GPT-4o",
-      "provider": "OpenAI",
-      "description": "A powerful and fast multimodal model from OpenAI.",
-      "versions": [
-        {
-          "version": "latest",
-          "supportedLanguages": ["en-us", "es", "fr"],
-          "intents": [
-            {
-              "name": "DefaultIntent",
-              "entities": []
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "gpt-4.1",
-      "name": "OpenAI GPT-4.1",
-      "provider": "OpenAI",
-      "description": "A highly capable model for complex reasoning from OpenAI.",
-      "versions": [
-        {
-          "version": "latest",
-          "supportedLanguages": ["en-us", "es", "fr"],
-          "intents": [
-            {
-              "name": "DefaultIntent",
-              "entities": []
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
+Provides Genesys Architect with a list of available "bots," which represent specific OpenAI API configurations (e.g., a particular model).
 
 ### GET /botconnector/bots/{botId}
 
-Returns the details for a specific bot configuration by its ID. The implementation can filter the static list from the `GET /botconnector/bots` endpoint.
+Returns details for a specific bot configuration by its ID.
 
 ### POST /botconnector/messages
 
-This is the core endpoint for message processing. It receives messages from Genesys and forwards them to OpenAI, then returns OpenAI's response.
+The core endpoint for processing messages. It receives messages from Genesys, forwards them to OpenAI, and returns the response.
 
 ## 4. Request & Response Mapping
 
 ### Genesys to OpenAI Request Transformation
 
-The middleware must map the incoming Genesys `IncomingMessagesRequest` to an OpenAI `POST /v1/responses` request body.
+The middleware maps the Genesys `IncomingMessagesRequest` to an OpenAI `POST /v1/responses` request. Key transformations include:
 
-| Genesys Field (IncomingMessagesRequest) | OpenAI Field (POST /v1/responses) | Logic / Notes |
-|------------------------------------------|-----------------------------------|---------------|
-| `botSessionId` | `previous_response_id` | Crucial for context. The middleware must maintain a mapping of `botSessionId` to the latest OpenAI `response.id`. For the first message in a session, this field is null. |
-| Header `OPENAI_API_KEY` (from Credentials) | Header `Authorization` | Extract the key from the request header and format it as `Bearer <key>`. |
-| `inputMessage.text` | `input` (string) | The primary user message. |
-| `inputMessage.content` (for attachments) | `input` (array of items) | If an attachment is present, transform the input into an array. Genesys provides a URL for the attachment. The middleware maps this to an `input_file` object. Assume PDFs only. See OpenAI docs for `input_file` structure. |
-| `parameters` (Session Variables) | `model`, `temperature`, etc. | Check for keys like `openai_model`, `openai_temperature` in the parameters map and use them to override defaults in the OpenAI request. The `botId` from Genesys can serve as the default model. |
-| `genesysConversationId` | `metadata` | Create a map: `{ "genesys_conversation_id": "<value>" }`. |
-| Configured MCP Servers | `tools` | Load pre-configured MCP server details and add them to the tools array in the request. See the configuration section below. |
-
-### Example Input Transformation for File Attachment
-
-If the Genesys message contains text and a PDF attachment, the OpenAI input should look like this:
-
-```json
-"input": [
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "input_file",
-                "file_url": "https://url.from.genesys/attachment.pdf"
-            },
-            {
-                "type": "input_text",
-                "text": "What does this document say about project alpha?"
-            }
-        ]
-    }
-]
-```
+| Genesys Field | OpenAI Field | Logic / Notes |
+|---|---|---|
+| `botSessionId` | `previous_response_id` | Maps `botSessionId` to maintain conversation context. |
+| Header `OPENAI_API_KEY` | Header `Authorization` | Formats the key as `Bearer <key>`. |
+| `inputMessage.text` | `input` (string) | The user's primary message. |
+| `inputMessage.content` | `input` (array) | Transforms attachments into an `input_file` object. |
+| `parameters` | `model`, `temperature` | Overrides default OpenAI parameters using session variables. |
+| `genesysConversationId` | `metadata` | Maps to `{ "genesys_conversation_id": "<value>" }`. |
+| MCP Servers | `tools` | Loads pre-configured MCP server details. |
 
 ### OpenAI to Genesys Response Transformation
 
-| OpenAI Field (Response Object) | Genesys Field (IncomingMessagesResponse) | Logic / Notes |
-|--------------------------------|-------------------------------------------|---------------|
-| `id` | `botSessionId` mapping | Store this id. The next message from this user will use this as `previous_response_id`. |
-| `output[0].content[0].text` | `replyMessages` | Assuming the first output is a message, map its text content. Create a `ReplyMessage` object of type `Text`. |
-| `status` | `botState` | If status is `completed`, `botState` should be `MoreData` to keep the session open for multi-turn chat. If status is `failed`, set `botState` to `Failed`. A `botState` of `Complete` would end the session; use this only if a specific "end conversation" intent is detected (not applicable for this general LLM setup). |
-| `error` | `errorInfo` | If an error occurs, map the `error.code` and `error.message` to Genesys's `ErrorInfo` object and set `botState` to `Failed`. |
+| OpenAI Field | Genesys Field | Logic / Notes |
+|---|---|---|
+| `id` | `botSessionId` mapping | Stores the `response.id` for the next turn. |
+| `output[0]...text` | `replyMessages` | Maps the text content to a `ReplyMessage` object. |
+| `status` | `botState` | Sets to `MoreData` for ongoing chats or `Failed` on error. |
+| `error` | `errorInfo` | Maps error details to the `ErrorInfo` object. |
 
 ## 5. Configuration
 
-The middleware should be configurable via environment variables or a `config.json` file.
+The middleware's behavior is controlled through environment variables, which can be loaded from a `.env.local` file during local development or set directly in the Vercel project settings for production. This approach ensures that sensitive information is kept out of the codebase.
 
 | Variable | Description | Example |
-|----------|-------------|---------|
-| `PORT` | The port the service will run on. | `3000` |
-| `LOG_LEVEL` | Logging verbosity. | `info` |
-| `GENESYS_CONNECTION_SECRET` | The shared secret to validate requests from Genesys Cloud. | `your-secure-secret-string` |
-| `DEFAULT_OPENAI_MODEL` | The default model to use if not specified in session variables. | `gpt-4o` |
-| `DEFAULT_OPENAI_TEMPERATURE` | The default temperature if not specified. | `0.7` |
-| `MCP_SERVERS_CONFIG_PATH` | Path to a JSON file defining MCP servers to enable. | `./mcp_config.json` |
-| `SESSION_STORE_TYPE` | Type of session store (memory or redis). For serverless environments like Vercel, always use "redis"| `redis` |
-| `KV_REST_API_URL` | Upstash Redis REST URL. | `https://your-upstash-endpoint.upstash.io` |
-| `KV_REST_API_TOKEN` | Upstash Redis REST token. | `your-upstash-token` |
+|---|---|---|
+| `PORT` | The port the service will run on for local development. | `3000` |
+| `LOG_LEVEL` | Sets the logging verbosity. Options are `debug`, `info`, `warn`, or `error`. | `info` |
+| `GENESYS_CONNECTION_SECRET` | A strong, unique secret used to validate that incoming requests are from your Genesys Cloud organization. | `your-secure-secret-string` |
+| `DEFAULT_OPENAI_MODEL` | The fallback OpenAI model ID to use if one is not specified in the Genesys Architect flow. | `gpt-4o` |
+| `DEFAULT_OPENAI_TEMPERATURE` | The default creativity/randomness setting (0.0 to 2.0). Lower values are more deterministic. | `0.7` |
+| `MCP_SERVERS_CONFIG_PATH` | An optional path to a JSON file that defines external MCP servers or other OpenAI tools to enable. | `./mcp_config.json` |
+| `SESSION_STORE_TYPE` | Specifies the session storage mechanism. Use `memory` for local testing and `redis` for production/serverless environments. | `redis` |
+| `KV_REST_API_URL` | The REST API URL for your Redis database (e.g., from Vercel KV or Upstash). Required if `SESSION_STORE_TYPE` is `redis`. | `https://your-db.upstash.io` |
+| `KV_REST_API_TOKEN` | The read/write token for your Redis database. Required if `SESSION_STORE_TYPE` is `redis`. | `your-upstash-token` |
 
-### mcp_config.json Example
+### Genesys Session Variables
 
-This file allows for dynamic configuration of OpenAI Tools without redeploying the middleware.
+You can dynamically control the OpenAI model's behavior on a per-interaction basis by setting Session Variables in your Genesys Architect flow. These variables are passed in the `parameters` object of the request.
+
+- `openai_model` (String): Overrides the `DEFAULT_OPENAI_MODEL`. Use this to switch between models like `gpt-4o` and `gpt-4.1` for different use cases within the same flow.
+- `openai_temperature` (String): Overrides the `DEFAULT_OPENAI_TEMPERATURE`. This value must be a string that can be parsed into a number (e.g., "0.8").
+
+### Example `mcp_config.json`
+
+This file allows for the dynamic configuration of OpenAI Tools without needing to redeploy the middleware. The application will load the tools defined in this file at runtime.
 
 ```json
 [
@@ -186,48 +122,48 @@ This file allows for dynamic configuration of OpenAI Tools without redeploying t
 ## 6. Security
 
 ### Connection Secret
-On every incoming request to `POST /messages`, the middleware MUST validate the connection secret sent by Genesys in the headers. Reject any request with a `403 Forbidden` if the secret is missing or invalid.
+
+On every incoming request to `POST /botconnector/messages`, the middleware validates the `GENESYS_CONNECTION_SECRET` sent in the request headers. If the secret is missing or does not match the value set in the environment variables, the request is rejected with a `403 Forbidden` status, preventing unauthorized access.
 
 ### API Key Handling
-The OpenAI API Key is expected in a header like `OPENAI_API_KEY` or `Authorization` from the Genesys Credential system. The middleware MUST extract this key and use it for the outbound call to OpenAI. Do not log this key or store it anywhere.
 
-### Input Sanitization
-While OpenAI has its own safeguards, consider basic sanitization or validation of inputs if required by security policies.
+The `OPENAI_API_KEY` is securely managed within Genesys Cloud as a credential and is passed in the headers of each request. The middleware extracts this key for the outbound call to the OpenAI API and immediately discards it. **The key is never logged or stored**, ensuring that sensitive credentials do not persist in the middleware layer.
 
 ## 7. Session Management
 
-A key-value store (like Redis for production, or an in-memory map for development) is required to map the Genesys `botSessionId` to the latest OpenAI `response.id`.
+To maintain a stateful conversation, the middleware uses a key-value store to map the Genesys `botSessionId` to the most recent OpenAI `response.id`.
 
-- **Key**: `genesys_bot_session:<botSessionId>`
-- **Value**: `<latest_openai_response_id>`
-- **TTL (Time to Live)**: The TTL for each entry should be set based on the `botSessionTimeout` value provided by Genesys in the `IncomingMessagesRequest`. This ensures that stale sessions are automatically cleared.
+* **Storage Options**: For local development, an in-memory map is sufficient. For production and serverless deployments (like Vercel), a persistent Redis database (such as Vercel KV or Upstash) is required to ensure session data is not lost between function invocations.
 
-## 8. Error Handling
+* **Key-Value Structure**:
+  * **Key**: `genesys_bot_session:<botSessionId>`
+  * **Value**: `<latest_openai_response_id>`
 
-### OpenAI Errors
-Map OpenAI API errors (e.g., 4xx, 5xx status codes) to the appropriate Genesys error response. Return a 5xx status code to Genesys for OpenAI server errors, which may trigger a retry. Return a 4xx for client-side errors (e.g., invalid configuration).
+* **Session Expiration (TTL)**: The middleware uses the `botSessionTimeout` value from the Genesys request to set a Time-to-Live (TTL) on each session entry. This automatically clears stale sessions from the store, preventing data buildup.
 
-### Middleware Errors
-For internal middleware errors, return a generic 500 error to Genesys and log the detailed error stack trace for debugging. The response to Genesys should include the `errorInfo` object where possible.
+* **Resilient Fallback**: If the application is configured to use `redis` but the necessary `KV_REST_API_URL` or `KV_REST_API_TOKEN` are not provided, it will log a warning and automatically fall back to the in-memory store. This prevents deployment failures due to missing configuration but is not suitable for production use.
 
-## Deployment on Vercel
+## 8. Deployment and Setup
 
-This middleware is designed to be deployed on Vercel serverless functions using Next.js API routes.
+### Vercel Deployment
 
-- Set environment variables in Vercel dashboard, including GENESYS_CONNECTION_SECRET, KV_REST_API_URL (Upstash REST URL, e.g. https://your-db.upstash.io), KV_REST_API_TOKEN (Upstash REST token), SESSION_STORE_TYPE=redis, etc.
-- For Redis, use Upstash. Create a free Upstash Redis DB from your Vercel dashboard ("Storage" tab) and connect it to your middleware project. db env vars will be automatically linked.
-- Deploy via git push to Vercel-linked repository.
+This middleware is optimized for deployment on Vercel's serverless platform.
 
-For local development, use `npm run dev`. Ensure .env.local has necessary vars like GENESYS_CONNECTION_SECRET.
+1. **Link Repository**: Connect your GitHub repository to a new Vercel project.
 
-### Genesys Cloud Setup
+2. **Set Environment Variables**: In the Vercel project dashboard, navigate to **Settings > Environment Variables**. Add all the necessary variables from the configuration table above, such as `GENESYS_CONNECTION_SECRET` and `SESSION_STORE_TYPE=redis`.
 
-In Genesys Cloud, when creating the Digital Bot Connector integration:
+3. **Configure Redis**: Navigate to the **Storage** tab in your Vercel dashboard and create a new **KV (Redis)** database. Connect it to your project, and Vercel will automatically create and link the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables.
 
-- Set Credentials:
-  - Field Name: OPENAI_API_KEY, Value: Your OpenAI key
-  - Field Name: GENESYS_CONNECTION_SECRET, Value: Your secret (matches env var)
+4. **Deploy**: Push your code to the main branch to trigger a production deployment.
 
-- Bot Connector URI: Your Vercel deployment URL, e.g. https://your-app.vercel.app/botconnector
+### Genesys Cloud Configuration
 
-Activate the integration before use.
+In your Genesys Cloud organization, set up the Digital Bot Connector integration:
+
+1. **Bot Connector URI**: Enter the full URL of your deployed Vercel application, pointing to the API base path.
+   * **Example**: `https://your-app-name.vercel.app/api/botconnector`
+
+2. **Set Credentials**: Configure the necessary authentication credentials in your Genesys Cloud organization.
+
+<img width="1086" height="535" alt="image" src="https://github.com/user-attachments/assets/18dbff9d-ea91-4c58-921f-28d1e0194979" />
