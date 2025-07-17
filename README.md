@@ -161,7 +161,7 @@ The middleware should be configurable via environment variables or a `config.jso
 | `DEFAULT_OPENAI_MODEL` | The default model to use if not specified in session variables. | `gpt-4o` |
 | `DEFAULT_OPENAI_TEMPERATURE` | The default temperature if not specified. | `0.7` |
 | `MCP_SERVERS_CONFIG_PATH` | Path to a JSON file defining MCP servers to enable. | `./mcp_config.json` |
-| `SESSION_STORE_TYPE` | Type of session store (memory or redis). | `redis` |
+| `SESSION_STORE_TYPE` | Type of session store (memory or redis). For serverless environments like Vercel, always use "redis"| `redis` |
 | `KV_REST_API_URL` | Upstash Redis REST URL. | `https://your-upstash-endpoint.upstash.io` |
 | `KV_REST_API_TOKEN` | Upstash Redis REST token. | `your-upstash-token` |
 
