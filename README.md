@@ -215,7 +215,7 @@ For internal middleware errors, return a generic 500 error to Genesys and log th
 This middleware is designed to be deployed on Vercel serverless functions using Next.js API routes.
 
 - Set environment variables in Vercel dashboard, including GENESYS_CONNECTION_SECRET, KV_REST_API_URL (Upstash REST URL, e.g. https://your-db.upstash.io), KV_REST_API_TOKEN (Upstash REST token), SESSION_STORE_TYPE=redis, etc.
-- For Redis, use Upstash, set KV_REST_API_URL and KV_REST_API_TOKEN accordingly from your Upstash Redis database console.
+- For Redis, use Upstash. Create a free Upstash Redis DB from your Vercel dashboard ("Storage" tab) and connect it to your middleware project. db env vars will be automatically linked.
 - Deploy via git push to Vercel-linked repository.
 
 For local development, use `npm run dev`. Ensure .env.local has necessary vars like GENESYS_CONNECTION_SECRET.
