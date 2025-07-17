@@ -8,7 +8,7 @@ The middleware will handle session management, message transformation, security,
 
 ### Key Features
 
-- **Stateless Conversation Management**: Leverages OpenAI's `previous_response_id` mapped to Genesys's `botSessionId` to maintain conversation context without storing chat history.
+- **Stateless Conversation Management**: Leverages OpenAI's `previous_response_id` mapped to Genesys's `botSessionId` to maintain conversation context without having to pass the whole conversation in every request to OpenAI.
 
 - **Dynamic Configuration**: Uses Genesys Session Variables to control OpenAI parameters like model and temperature on a per-flow basis.
 
