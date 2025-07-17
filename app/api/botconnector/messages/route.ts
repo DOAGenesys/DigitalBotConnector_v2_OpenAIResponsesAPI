@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Transform input
-    let input: OpenAI.Responses.ResponseCreateParams.Input;
+    let input: OpenAI.Responses.ResponseCreateParams['input'];
     const inputMessage = body.inputMessage;
     if (inputMessage.type === 'Text') {
       input = inputMessage.text || '';
