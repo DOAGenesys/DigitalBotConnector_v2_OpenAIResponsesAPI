@@ -14,7 +14,13 @@ const sessionStore = getSessionStore();
 
 export async function POST(req: NextRequest) {
   const body: GenesysIncomingMessagesRequest = await req.json();
-  logger.info('POST /botconnector/messages', { botSessionId: body.botSessionId, botId: body.botId });
+  logger.info({
+    message: 'POST /botconnector/messages received',
+    botSessionId: body.botSessionId,
+    botId: body.botId,
+    genesysConversationId: body.genesysConversationId
+  });
+  logger.debug({ message: 'Full incoming Genesys request body', body });
 
   const secret = req.headers.get('GENESYS_CONNECTION_SECRET');
   if (secret !== config.GENESYS_CONNECTION_SECRET) {
@@ -37,32 +43,36 @@ export async function POST(req: NextRequest) {
 
     let input: OpenAI.Responses.ResponseCreateParams['input'];
     const inputMessage = body.inputMessage;
-    if (inputMessage.type === 'Text') {
-      input = inputMessage.text || '';
-    } else if (inputMessage.type === 'Structured' && inputMessage.content) {
-      const attachment = inputMessage.content.find(c => c.contentType === 'Attachment');
-      if (attachment && attachment.attachment?.url) {
-        input = [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'input_file',
-                file_url: attachment.attachment.url,
-              },
-              {
-                type: 'input_text',
-                text: inputMessage.text || '',
-              },
-            ],
-          },
-        ];
-      } else {
-        input = inputMessage.text || '';
-      }
+
+    logger.debug({ message: 'Processing inputMessage', type: inputMessage.type, hasContent: !!inputMessage.content });
+
+    const attachment = inputMessage.content?.find(
+      (c) => c.contentType === 'Attachment' && c.attachment?.mediaType === 'File'
+    );
+
+    if (attachment && attachment.attachment?.url) {
+      logger.debug({ message: 'PDF attachment found', url: attachment.attachment.url });
+      input = [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_file',
+              file_url: attachment.attachment.url,
+            },
+            {
+              type: 'input_text',
+              text: inputMessage.text || 'Please analyze the attached document.',
+            },
+          ],
+        },
+      ];
     } else {
-      throw new Error('Invalid inputMessage type');
+      logger.debug('No PDF attachment found, processing as text message.');
+      input = inputMessage.text || '';
     }
+    
+    logger.debug({ message: 'Final input payload for OpenAI', input });
 
     let model = config.DEFAULT_OPENAI_MODEL;
     let temperature = config.DEFAULT_OPENAI_TEMPERATURE;
@@ -139,6 +149,7 @@ export async function POST(req: NextRequest) {
       errorInfo,
     };
 
+    logger.debug({ message: 'Sending response to Genesys', response: genesysResponse });
     return NextResponse.json(genesysResponse);
   } catch (err) {
     logger.error('Error processing message', err);
