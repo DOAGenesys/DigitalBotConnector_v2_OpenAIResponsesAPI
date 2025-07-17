@@ -1,4 +1,4 @@
-import { createClient } from 'redis';
+import { Redis } from '@upstash/redis';
 import { getConfig } from './config';
 import logger from './logger';
 
@@ -33,25 +33,23 @@ class MemoryStore implements SessionStore {
 }
 
 class RedisStore implements SessionStore {
-  private client: ReturnType<typeof createClient>;
+  private client: Redis;
 
   constructor() {
-    if (!config.REDIS_URL) {
-      throw new Error('REDIS_URL not set');
+    if (!config.REDIS_URL || !config.REDIS_TOKEN) {
+      throw new Error('REDIS_URL or REDIS_TOKEN not set');
     }
-    this.client = createClient({ url: config.REDIS_URL });
-    this.client.on('error', err => logger.error('Redis Client Error', err));
-    this.client.connect();
+    this.client = new Redis({ url: config.REDIS_URL, token: config.REDIS_TOKEN });
   }
 
   async get(key: string): Promise<string | undefined> {
     const value = await this.client.get(key);
-    return value || undefined;
+    return value as string || undefined;
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
     if (ttl) {
-      await this.client.set(key, value, { EX: ttl });
+      await this.client.set(key, value, { ex: ttl });
     } else {
       await this.client.set(key, value);
     }
