@@ -1,5 +1,5 @@
 {
-  "name": "genesys-openai-middleware",
+  "name": "genesys-digitalbotconnector-openai-responsesAPI-middleware",
   "version": "1.0.0",
   "private": true,
   "scripts": {
