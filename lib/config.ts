@@ -10,6 +10,7 @@ interface Config {
   MCP_SERVERS_CONFIG_PATH?: string;
   SESSION_STORE_TYPE: 'memory' | 'redis';
   REDIS_URL?: string;
+  REDIS_TOKEN?: string;
 }
 
 let config: Config;
@@ -25,6 +26,7 @@ export function getConfig(): Config {
       MCP_SERVERS_CONFIG_PATH: process.env.MCP_SERVERS_CONFIG_PATH,
       SESSION_STORE_TYPE: (process.env.SESSION_STORE_TYPE || 'memory') as Config['SESSION_STORE_TYPE'],
       REDIS_URL: process.env.REDIS_URL,
+      REDIS_TOKEN: process.env.REDIS_TOKEN,
     };
 
     // Load config.json if exists
