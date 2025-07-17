@@ -1,4 +1,3 @@
-// app/api/botconnector/bots/[botId]/route.ts
 import { NextResponse } from 'next/server';
 import { getBots } from '@/lib/bots';
 import logger from '@/lib/logger';
