@@ -7,14 +7,8 @@ This document outlines a middleware service connecting the Genesys Cloud Digital
 ### Key Features
 
 * **Stateless Conversation Management**: Uses OpenAI's `previous_response_id` mapped to Genesys's `botSessionId` for context, avoiding the need to store chat history.
-
 * **Dynamic Configuration**: Leverages Genesys Session Variables to control OpenAI parameters like model and temperature.
-
-* **Secure Credential Handling**: The OpenAI API Key is passed securely via request headers from the Genesys Credential Manager and is not stored in the middleware.
-
-* **File & Tool Integration**: Supports PDF attachments and OpenAI's tools, including Remote MCP (Model Context Protocol) servers.
-
-* **Production-Ready**: Includes guidelines for logging, error handling, and containerization.
+* **MCP Tool Integration**: Supports OpenAI's MCP tool (Remote MCP servers).
 
 ## 2. Architecture
 
@@ -64,7 +58,6 @@ The middleware maps the Genesys `IncomingMessagesRequest` to an OpenAI `POST /v1
 | `botSessionId` | `previous_response_id` | Maps `botSessionId` to maintain conversation context. |
 | Header `OPENAI_API_KEY` | Header `Authorization` | Formats the key as `Bearer <key>`. |
 | `inputMessage.text` | `input` (string) | The user's primary message. |
-| `inputMessage.content` | `input` (array) | Transforms attachments into an `input_file` object. |
 | `parameters` | `model`, `temperature` | Overrides default OpenAI parameters using session variables. |
 | `genesysConversationId` | `metadata` | Maps to `{ "genesys_conversation_id": "<value>" }`. |
 | MCP Servers | `tools` | Loads pre-configured MCP server details. |
@@ -98,8 +91,8 @@ The middleware's behavior is controlled through environment variables, which can
 
 You can dynamically control the OpenAI model's behavior on a per-interaction basis by setting Session Variables in your Genesys Architect flow. These variables are passed in the `parameters` object of the request.
 
-- `openai_model` (String): Overrides the `DEFAULT_OPENAI_MODEL`. Use this to switch between models like `gpt-4o` and `gpt-4.1` for different use cases within the same flow.
-- `openai_temperature` (String): Overrides the `DEFAULT_OPENAI_TEMPERATURE`. This value must be a string that can be parsed into a number (e.g., "0.8").
+* `openai_model` (String): Overrides the `DEFAULT_OPENAI_MODEL`. Use this to switch between models like `gpt-4o` and `gpt-4.1` for different use cases within the same flow.
+* `openai_temperature` (String): Overrides the `DEFAULT_OPENAI_TEMPERATURE`. This value must be a string that can be parsed into a number (e.g., "0.8").
 
 ### Example `mcp_config.json`
 
@@ -131,14 +124,22 @@ The `OPENAI_API_KEY` is securely managed within Genesys Cloud as a credential an
 
 ## 7. Session Management
 
-To maintain a stateful conversation, the middleware uses a key-value store to map the Genesys `botSessionId` to the most recent OpenAI `response.id`.
+### The Need for a Persistent State Store (Redis)
 
-* **Storage Options**: For local development, an in-memory map is sufficient. For production and serverless deployments (like Vercel), a persistent Redis database (such as Vercel KV or Upstash) is required to ensure session data is not lost between function invocations.
+HTTP-based APIs are inherently **stateless**, meaning each request is independent and has no memory of previous requests. However, chatbot conversations are **stateful** and require context from previous turns to be coherent. This middleware bridges that gap by managing the conversation state.
 
+The core mechanism is mapping the persistent `botSessionId` provided by Genesys to the `previous_response_id` required by the OpenAI Responses API for multi-turn conversations. This mapping must be stored somewhere between requests.
+
+In a **serverless environment** like Vercel, each API request might be handled by a different, short-lived function instance. A simple in-memory variable would be lost as soon as the function finishes. Therefore, an **external, persistent data store is mandatory** for production.
+
+This is why a **Redis database** (such as Vercel KV or Upstash) is used. It provides a fast, reliable key-value store that persists the session mapping across countless independent serverless function invocations, enabling a seamless and stateful conversation for the end-user.
+
+### Implementation Details
+
+* **Storage Options**: For local development, the application can use a simple in-memory store. For all production and serverless deployments, a persistent Redis database is required.
 * **Key-Value Structure**:
   * **Key**: `genesys_bot_session:<botSessionId>`
   * **Value**: `<latest_openai_response_id>`
-
 * **Session Expiration (TTL)**: The middleware uses the `botSessionTimeout` value from the Genesys request to set a Time-to-Live (TTL) on each session entry. This automatically clears stale sessions from the store, preventing data buildup.
 
 ## 8. Deployment and Setup
@@ -148,11 +149,8 @@ To maintain a stateful conversation, the middleware uses a key-value store to ma
 This middleware is optimized for deployment on Vercel's serverless platform.
 
 1. **Link Repository**: Connect your GitHub repository to a new Vercel project.
-
 2. **Set Environment Variables**: In the Vercel project dashboard, navigate to **Settings > Environment Variables**. Add all the necessary variables from the configuration table above, such as `GENESYS_CONNECTION_SECRET` and `SESSION_STORE_TYPE=redis`.
-
 3. **Configure Redis**: Navigate to the **Storage** tab in your Vercel dashboard and create a new **KV (Redis)** database. Connect it to your project, and Vercel will automatically create and link the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables.
-
 4. **Deploy**: Push your code to the main branch to trigger a production deployment.
 
 ### Genesys Cloud Configuration
@@ -161,7 +159,6 @@ In your Genesys Cloud organization, set up the Digital Bot Connector integration
 
 1. **Bot Connector URI**: Enter the full URL of your deployed Vercel application, pointing to the API base path.
    * **Example**: `https://your-app-name.vercel.app/api/botconnector`
-
-2. **Set Credentials**: Configure the necessary authentication credentials in your Genesys Cloud organization.
+2. **Set Credentials**: Configure the necessary authentication credentials in your Genesys Cloud organization:
 
 <img width="1086" height="535" alt="image" src="https://github.com/user-attachments/assets/18dbff9d-ea91-4c58-921f-28d1e0194979" />
