@@ -163,7 +163,7 @@ In your Genesys Cloud organization, set up the Digital Bot Connector integration
 
 1. **Bot Connector URI**: Enter the full URL of your deployed Vercel application, pointing to the API base path.
    * **Example**: `https://your-app-name.vercel.app/api/botconnector`
-2. **Set Credentials**: Configure the necessary authentication credentials in your Genesys Cloud organization:
+2. **Set Credentials**: Configure the necessary authentication credentials (`OPENAI_API_KEY` and `GENESYS_CONNECTION_SECRET`) in your Genesys Cloud organization:
 
 <img width="1086" height="535" alt="image" src="https://github.com/user-attachments/assets/18dbff9d-ea91-4c58-921f-28d1e0194979" />
 
