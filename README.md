@@ -12,7 +12,7 @@ More info about OpenAI Responses API: https://platform.openai.com/docs/api-refer
 
 * **Stateless Conversation Management**: Uses OpenAI's `previous_response_id` mapped to Genesys's `botSessionId` for context, avoiding the need to store chat history.
 * **Dynamic Configuration**: Leverages Genesys Session Variables to control OpenAI parameters like model and temperature.
-* **MCP Tool Integration**: Supports OpenAI's MCP tool (Remote MCP servers).
+* **MCP Tool Integration**: Supports OpenAI's MCP tool (Remote MCP servers). Note that this feature has not been tested, and it is here just for illustrating potential advanced use cases.
 
 ## 2. Architecture
 
