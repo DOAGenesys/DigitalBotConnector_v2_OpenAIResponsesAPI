@@ -37,7 +37,7 @@ sequenceDiagram
 
 ## 3. API Endpoints
 
-The middleware implements the following endpoints to comply with the Genesys Digital Bot Connector specification.
+The middleware implements the following endpoints to comply with the Genesys Digital Bot Connector specification (https://developer.genesys.cloud/commdigital/textbots/digital-botconnector-customer-api-spec).
 
 ### GET /botconnector/bots
 
