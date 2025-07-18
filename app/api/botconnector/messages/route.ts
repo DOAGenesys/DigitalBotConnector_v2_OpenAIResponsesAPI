@@ -12,8 +12,6 @@ const config = getConfig();
 const openai = new OpenAI({ apiKey: '' });
 const sessionStore = getSessionStore();
 
-const SESSION_FILE_KEY_PREFIX = 'file-url:';
-
 export async function POST(req: NextRequest) {
   const body: GenesysIncomingMessagesRequest = await req.json();
   logger.info({
@@ -39,7 +37,6 @@ export async function POST(req: NextRequest) {
   try {
     const { botSessionId, inputMessage, genesysConversationId, botId, parameters, botSessionTimeout } = body;
     const sessionKey = botSessionId || new Date().toISOString();
-    const fileSessionKey = `${SESSION_FILE_KEY_PREFIX}${sessionKey}`;
 
     let previousResponseId: string | undefined;
     if (botSessionId) {
@@ -47,50 +44,10 @@ export async function POST(req: NextRequest) {
       logger.debug(`Retrieved previousResponseId: ${previousResponseId}`);
     }
 
-    let input: OpenAI.Responses.ResponseCreateParams['input'];
-    
-    const attachment = inputMessage.content?.find(
-      (c) => c.contentType === 'Attachment' && c.attachment?.mediaType === 'File'
-    );
+    const input: OpenAI.Responses.ResponseCreateParams['input'] = inputMessage.text || '';
+    logger.debug({ message: 'Processing as text-only input', text: input });
 
-    if (attachment && attachment.attachment?.url) {
-      logger.debug({ message: 'File attachment received. Storing URL in session.', url: attachment.attachment.url });
-      const ttl = botSessionTimeout ? botSessionTimeout * 60 : undefined;
-      await sessionStore.set(fileSessionKey, attachment.attachment.url, ttl);
-
-      const genesysResponse: GenesysIncomingMessagesResponse = {
-        botState: 'MoreData',
-        replyMessages: [{ type: 'Text', text: "I've received your document. What would you like me to do with it?" }],
-        intent: 'DefaultIntent',
-        confidence: 1.0,
-        entities: [],
-        parameters: {},
-      };
-      logger.debug({ message: 'Responding to Genesys after receiving file.', response: genesysResponse });
-      return NextResponse.json(genesysResponse);
-    }
-
-    const savedFileUrl = await sessionStore.get(fileSessionKey);
-    if (savedFileUrl) {
-      logger.debug({ message: 'Found saved file URL in session. Combining with text.', url: savedFileUrl, text: inputMessage.text });
-      input = [
-        {
-          role: 'user',
-          content: [
-            { type: 'input_file', file_url: savedFileUrl },
-            { type: 'input_text', text: inputMessage.text || 'Please analyze the attached document.' },
-          ],
-        },
-      ];
-      await sessionStore.set(fileSessionKey, '', 1); 
-    } else {
-      logger.debug('No saved file URL found. Processing as standard text message.');
-      input = inputMessage.text || '';
-    }
-
-    logger.debug({ message: 'Final input payload for OpenAI', input: JSON.stringify(input) });
-    
-    if (typeof input === 'string' && !input.trim()) {
+    if (!input.trim()) {
         logger.warn('Input text is empty, returning empty response to Genesys.');
         const genesysResponse: GenesysIncomingMessagesResponse = {
             botState: 'MoreData',
