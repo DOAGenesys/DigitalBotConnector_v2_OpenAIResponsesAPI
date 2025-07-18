@@ -1,4 +1,4 @@
-# Middleware: Genesys Cloud Digital Bot Connector & OpenAI Responses API
+# Genesys Cloud Digital Bot Connector & OpenAI Responses API Middleware
 
 ## 1. Overview
 
