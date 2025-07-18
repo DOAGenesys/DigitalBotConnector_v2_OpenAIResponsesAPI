@@ -162,3 +162,8 @@ In your Genesys Cloud organization, set up the Digital Bot Connector integration
 2. **Set Credentials**: Configure the necessary authentication credentials in your Genesys Cloud organization:
 
 <img width="1086" height="535" alt="image" src="https://github.com/user-attachments/assets/18dbff9d-ea91-4c58-921f-28d1e0194979" />
+
+3. Example invocation from Inbound Message Flow:
+
+<img width="1281" height="994" alt="image" src="https://github.com/user-attachments/assets/f0d0d1d4-d95a-4a05-9825-be668433865d" />
+
