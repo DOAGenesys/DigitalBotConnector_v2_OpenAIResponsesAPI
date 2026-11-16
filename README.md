@@ -6,13 +6,14 @@ This document outlines a middleware service connecting the Genesys Cloud Digital
 
 More info about Genesys Cloud Digital Bot Connector: https://help.mypurecloud.com/articles/about-genesys-digital-bot-connector
 
-More info about OpenAI Responses API: https://platform.openai.com/docs/api-reference/responses
+More info about OpenAI Responses API: https://developers.openai.com/api/reference/resources/responses/methods/create
 
 ### Key Features
 
+* **Latest OpenAI models only**: The connector exposes exactly two models, GPT-6.1 Terra and GPT-6 Luna (see [Supported Models](#3-supported-models)). Requests for any other model are ignored and fall back to a supported one.
 * **Stateless Conversation Management**: Uses OpenAI's `previous_response_id` mapped to Genesys's `botSessionId` for context, avoiding the need to store chat history.
-* **Dynamic Configuration**: Leverages Genesys Session Variables to control OpenAI parameters like model and temperature.
-* **MCP Tool Integration**: Supports OpenAI's MCP tool (Remote MCP servers). Note that this feature has not been tested yet, and it is here just for illustrating potential advanced use cases.
+* **Dynamic Configuration**: Leverages Genesys Session Variables to control the model, reasoning effort, temperature, and response verbosity per interaction.
+* **Tool Integration**: Supports OpenAI's hosted tools, such as remote MCP servers and web search, through a JSON configuration file. Note that this feature has not been tested against a live MCP server yet, and it is here just for illustrating potential advanced use cases.
 
 ## 2. Architecture
 
@@ -28,20 +29,33 @@ sequenceDiagram
     User->>+Genesys Cloud: Sends message
     Genesys Cloud->>+Middleware: POST /botconnector/messages (with message, session info, API key)
     Middleware->>+Middleware: Transform Genesys request to OpenAI format
-    Middleware->>+OpenAI API: POST /v1/responses (with prompt, context, config)
-    OpenAI API-->>-Middleware: Response object (with text output)
+    Middleware->>+OpenAI API: POST /v1/responses (model, reasoning, previous_response_id, tools)
+    OpenAI API-->>-Middleware: Response object (with output messages)
     Middleware->>+Middleware: Transform OpenAI response to Genesys format
     Middleware-->>-Genesys Cloud: 200 OK (with reply message)
     Genesys Cloud-->>-User: Displays bot response
 ```
 
-## 3. API Endpoints
+## 3. Supported Models
+
+Each model is published to Genesys Architect as a "bot", and the bot ID is the OpenAI model ID. These are the only models the middleware sends to OpenAI.
+
+| Bot ID / Model | Best for | Notes |
+|---|---|---|
+| `gpt-6.1-terra` | Clear, natural writing and visual reasoning. A good fit for most customer conversations. | Default model. |
+| `gpt-6-luna` | Focused, high-volume tasks at the lowest cost. | |
+
+Both models have a 1,050,000-token context window and up to 128,000 output tokens, and both accept every reasoning effort from `none` to `max`. See the OpenAI model pages for [GPT-6.1 Terra](https://developers.openai.com/api/docs/models/gpt-6.1-terra) and [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) for pricing and rate limits.
+
+**Upgrading from an earlier version:** the former bots `gpt-4.1-mini` and `gpt-4.1-nano` no longer exist. Update each **Call Digital Bot Connector** action in Architect to select one of the bots above and republish the flow. Until then, requests from those flows are served by `DEFAULT_OPENAI_MODEL`.
+
+## 4. API Endpoints
 
 The middleware implements the following endpoints to comply with the Genesys Digital Bot Connector specification (https://developer.genesys.cloud/commdigital/textbots/digital-botconnector-customer-api-spec).
 
 ### GET /botconnector/bots
 
-Provides Genesys Architect with a list of available "bots," which represent specific OpenAI API configurations (e.g., a particular model).
+Provides Genesys Architect with the list of available "bots", one per supported model.
 
 ### GET /botconnector/bots/{botId}
 
@@ -51,7 +65,7 @@ Returns details for a specific bot configuration by its ID.
 
 The core endpoint for processing messages. It receives messages from Genesys, forwards them to OpenAI, and returns the response.
 
-## 4. Request & Response Mapping
+## 5. Request & Response Mapping
 
 ### Genesys to OpenAI Request Transformation
 
@@ -59,33 +73,51 @@ The middleware maps the Genesys `IncomingMessagesRequest` to an OpenAI `POST /v1
 
 | Genesys Field | OpenAI Field | Logic / Notes |
 |---|---|---|
-| `botSessionId` | `previous_response_id` | Maps `botSessionId` to maintain conversation context. |
+| `botSessionId` | `previous_response_id` | Looks up the last response ID stored for the session to maintain conversation context. |
 | Header `OPENAI_API_KEY` | Header `Authorization` | Formats the key as `Bearer <key>`. |
 | `inputMessage.text` | `input` (string) | The user's primary message. |
-| `parameters` | `model`, `temperature` | Overrides default OpenAI parameters using session variables. |
+| `botId` or `parameters.openai_model` | `model` | Only `gpt-6.1-terra` and `gpt-6-luna` are accepted. |
+| `parameters.openai_reasoning_effort` | `reasoning.effort` | Defaults to `DEFAULT_OPENAI_REASONING_EFFORT`. |
+| `parameters.openai_temperature` | `temperature` | Sent only when the reasoning effort is `none`. |
+| `parameters.openai_verbosity` | `text.verbosity` | Sent only when configured. |
 | `genesysConversationId` | `metadata` | Maps to `{ "genesys_conversation_id": "<value>" }`. |
-| MCP Servers | `tools` | Loads pre-configured MCP server details. |
+| Tools config file | `tools` | Loads pre-configured MCP servers and other hosted tools. Omitted when the file is empty or not configured. |
+| (always) | `store: true` | Required for `previous_response_id` chaining. |
 
 ### OpenAI to Genesys Response Transformation
 
 | OpenAI Field | Genesys Field | Logic / Notes |
 |---|---|---|
-| `id` | `botSessionId` mapping | Stores the `response.id` for the next turn. |
-| `output[0]...text` | `replyMessages` | Maps the text content to a `ReplyMessage` object. |
-| `status` | `botState` | Sets to `MoreData` for ongoing chats or `Failed` on error. |
-| `error` | `errorInfo` | Maps error details to the `ErrorInfo` object. |
+| `id` | `botSessionId` mapping | Stores the `response.id` for the next turn, but only after a successful turn, so a failed turn never breaks the conversation chain. |
+| `output[]` messages | `replyMessages` | Each assistant message becomes one `Text` reply. Messages in the `commentary` phase (progress notes written while the model uses tools) are skipped when a final answer exists. Refusals are returned as text. |
+| `status` | `botState` | `completed` maps to `MoreData`. `incomplete` maps to `MoreData` with the partial text when the reason is `max_output_tokens`, and to `Failed` otherwise. `failed` and any other status map to `Failed`. |
+| `error` / `incomplete_details` | `errorInfo` | Maps error details to the `ErrorInfo` object. |
 
-## 5. Configuration
+### Error Handling
 
-The middleware's behavior is controlled through environment variables, which can be loaded from a `.env.local` file during local development or set directly in the Vercel project settings for production. This approach ensures that sensitive information is kept out of the codebase.
+The middleware follows the Genesys rules for webhook errors: Genesys retries `5xx` responses and sends the flow down the failure path for everything else.
+
+| Situation | HTTP status | `botState` |
+|---|---|---|
+| OpenAI timeout, connection error, rate limit (429), or OpenAI 5xx | `500` (Genesys retries) | `Failed` |
+| Other OpenAI errors, such as an invalid API key or a bad request | `200` | `Failed` |
+| Missing or invalid `GENESYS_CONNECTION_SECRET` | `403` | n/a |
+| Missing `OPENAI_API_KEY` header or invalid JSON body | `400` | n/a |
+
+## 6. Configuration
+
+The middleware's behavior is controlled through environment variables, which can be loaded from a `.env.local` file during local development or set directly in the Vercel project settings for production. This approach ensures that sensitive information is kept out of the codebase. The committed [`.env.example`](.env.example) lists every variable with placeholder values.
 
 | Variable | Description | Example |
 |---|---|---|
 | `PORT` | The port the service will run on for local development. | `3000` |
 | `LOG_LEVEL` | Sets the logging verbosity. Options are `debug`, `info`, `warn`, or `error`. | `info` |
-| `GENESYS_CONNECTION_SECRET` | A strong, unique secret used to validate that incoming requests are from your Genesys Cloud organization. | `your-secure-secret-string` |
-| `DEFAULT_OPENAI_MODEL` | The fallback OpenAI model ID to use if one is not specified in the Genesys Architect flow. | `gpt-4o` |
-| `DEFAULT_OPENAI_TEMPERATURE` | The default creativity/randomness setting (0.0 to 2.0). Lower values are more deterministic. | `0.7` |
+| `GENESYS_CONNECTION_SECRET` | **Required.** A strong, unique secret used to validate that incoming requests are from your Genesys Cloud organization. If it is not set, every request is rejected. | `your-secure-secret-string` |
+| `DEFAULT_OPENAI_MODEL` | The model used when the Genesys bot ID is not a supported model. Must be `gpt-6.1-terra` or `gpt-6-luna`. | `gpt-6.1-terra` |
+| `DEFAULT_OPENAI_REASONING_EFFORT` | The default reasoning effort: `none`, `low`, `medium`, `high`, `xhigh`, or `max`. Defaults to `none` for the fastest replies. | `none` |
+| `DEFAULT_OPENAI_TEMPERATURE` | The default creativity/randomness setting (0.0 to 2.0). Lower values are more deterministic. Only sent when the reasoning effort is `none`. | `0.7` |
+| `DEFAULT_OPENAI_VERBOSITY` | Optional default response length: `low`, `medium`, or `high`. When unset, OpenAI's default (`medium`) applies. | `low` |
+| `OPENAI_TIMEOUT_MS` | Timeout for each OpenAI request, in milliseconds. Keep it below the **Bot Response Timeout** of the Architect action (60 seconds at most). Defaults to `50000`. | `25000` |
 | `MCP_SERVERS_CONFIG_PATH` | An optional path to a JSON file that defines external MCP servers or other OpenAI tools to enable. | `./mcp_config.json` |
 | `SESSION_STORE_TYPE` | Specifies the session storage mechanism. Use `memory` for local testing and `redis` for production/serverless environments. | `redis` |
 | `KV_REST_API_URL` | The REST API URL for your Redis database (e.g., from Vercel KV or Upstash). Required if `SESSION_STORE_TYPE` is `redis`. | `https://your-db.upstash.io` |
@@ -93,14 +125,22 @@ The middleware's behavior is controlled through environment variables, which can
 
 ### Genesys Session Variables
 
-You can dynamically control the OpenAI model's behavior on a per-interaction basis by setting Session Variables in your Genesys Architect flow. These variables are passed in the `parameters` object of the request.
+You can dynamically control the OpenAI model's behavior on a per-interaction basis by setting Session Variables in your Genesys Architect flow. These variables are passed in the `parameters` object of the request. Invalid values are ignored and logged as warnings.
 
-* `openai_model` (String): Overrides the `DEFAULT_OPENAI_MODEL`. Use this to switch between models like `gpt-4o` and `gpt-4.1` for different use cases within the same flow.
-* `openai_temperature` (String): Overrides the `DEFAULT_OPENAI_TEMPERATURE`. This value must be a string that can be parsed into a number (e.g., "0.8").
+* `openai_model` (String): Overrides the model selected by the bot. Use this to switch between `gpt-6.1-terra` and `gpt-6-luna` for different use cases within the same flow. Any other model is ignored.
+* `openai_reasoning_effort` (String): Overrides `DEFAULT_OPENAI_REASONING_EFFORT`. One of `none`, `low`, `medium`, `high`, `xhigh`, or `max`.
+* `openai_temperature` (String): Overrides `DEFAULT_OPENAI_TEMPERATURE`. This value must be a string that can be parsed into a number between 0 and 2 (e.g., "0.8"). It is ignored unless the reasoning effort is `none`.
+* `openai_verbosity` (String): Overrides `DEFAULT_OPENAI_VERBOSITY`. One of `low`, `medium`, or `high`.
+
+### Reasoning Effort, Temperature and Latency
+
+GPT-6.1 Terra and GPT-6 Luna are reasoning models. The OpenAI API rejects `temperature` (and `top_p`) for these models unless `reasoning.effort` is `none`, so the middleware only sends a temperature in that case.
+
+Higher reasoning efforts can improve answers to complex questions, but they add latency. Genesys waits for a bot reply only as long as the **Bot Response Timeout** set on the Architect action (60 seconds at most), so the middleware defaults to `none` and times out OpenAI requests after `OPENAI_TIMEOUT_MS`. Set `OPENAI_TIMEOUT_MS` a few seconds below your Bot Response Timeout. If you raise the effort, test response times with realistic conversations, and prefer `low` or `medium` for live chat.
 
 ### Example `mcp_config.json`
 
-This file allows for the dynamic configuration of OpenAI Tools without needing to redeploy the middleware. The application will load the tools defined in this file at runtime.
+This file configures OpenAI tools without code changes. The application reads it on every request, and it is bundled into the Vercel deployment through `outputFileTracingIncludes` in `next.config.mjs`. If you store the file under a different path, update that setting as well.
 
 ```json
 [
@@ -111,22 +151,29 @@ This file allows for the dynamic configuration of OpenAI Tools without needing t
     "require_approval": "never"
   },
   {
-    "type": "web_search_preview"
+    "type": "web_search"
   }
 ]
 ```
 
-## 6. Security
+Keep these constraints in mind:
+
+* Entries without a `type` are treated as remote MCP servers (`"type": "mcp"`).
+* Set `"require_approval": "never"` on MCP servers. The OpenAI default is `always`, which pauses the response for an approval that this connector cannot give.
+* Use hosted tools only (`mcp`, `web_search`, `file_search`, `code_interpreter`). Function and custom tools need your own code to run them, which this connector does not do.
+* This file is committed to the repository, so never put API keys or tokens in it, for example in an MCP `headers` or `authorization` field.
+
+## 7. Security
 
 ### Connection Secret
 
-On every incoming request to `POST /botconnector/messages`, the middleware validates the `GENESYS_CONNECTION_SECRET` sent in the request headers. If the secret is missing or does not match the value set in the environment variables, the request is rejected with a `403 Forbidden` status, preventing unauthorized access.
+On every incoming request to `POST /botconnector/messages`, the middleware validates the `GENESYS_CONNECTION_SECRET` sent in the request headers using a constant-time comparison. If the secret is missing or does not match the value set in the environment variables, the request is rejected with a `403 Forbidden` status, preventing unauthorized access. If the environment variable itself is not set, all requests are rejected.
 
 ### API Key Handling
 
-The `OPENAI_API_KEY` is securely managed within Genesys Cloud as a credential and is passed in the headers of each request. The middleware extracts this key for the outbound call to the OpenAI API and immediately discards it. **The key is never logged or stored**, ensuring that sensitive credentials do not persist in the middleware layer.
+The `OPENAI_API_KEY` is securely managed within Genesys Cloud as a credential and is passed in the headers of each request. The middleware uses this key for the outbound call to the OpenAI API and immediately discards it. **The key is never logged or stored**, and API keys and bearer tokens are redacted from OpenAI error messages before they are logged or returned to Genesys.
 
-## 7. Session Management
+## 8. Session Management
 
 ### The Need for a Persistent State Store (Redis)
 
@@ -142,11 +189,27 @@ This is why a **Redis database** (such as Vercel KV or Upstash) is used. It prov
 
 * **Storage Options**: For local development, the application can use a simple in-memory store. For all production and serverless deployments, a persistent Redis database is required.
 * **Key-Value Structure**:
-  * **Key**: `genesys_bot_session:<botSessionId>`
+  * **Key**: `<botSessionId>`
   * **Value**: `<latest_openai_response_id>`
 * **Session Expiration (TTL)**: The middleware uses the `botSessionTimeout` value from the Genesys request to set a Time-to-Live (TTL) on each session entry. This automatically clears stale sessions from the store, preventing data buildup.
+* **OpenAI Storage**: Responses are created with `store: true`, which `previous_response_id` requires. OpenAI keeps stored responses for 30 days by default. All earlier turns in a chain are billed as input tokens on every new turn.
 
-## 8. Deployment and Setup
+## 9. Deployment and Setup
+
+### Requirements
+
+* Node.js 22 or later (required by the `openai` SDK v7).
+* An OpenAI API key with access to `gpt-6.1-terra` and/or `gpt-6-luna`.
+
+The project is built with Next.js 16 (App Router route handlers) and the official `openai` Node.js SDK v7.
+
+### Local Development
+
+1. Install dependencies: `npm install`
+2. Copy `.env.example` to `.env.local` and fill in your own values.
+3. Start the development server: `npm run dev`
+4. Run the unit tests: `npm test`
+5. Run the linter: `npm run lint`
 
 ### Vercel Deployment
 
@@ -155,7 +218,7 @@ This middleware is optimized for deployment on Vercel's serverless platform.
 1. **Link Repository**: Connect your GitHub repository to a new Vercel project.
 2. **Set Environment Variables**: In the Vercel project dashboard, navigate to **Settings > Environment Variables**. Add all the necessary variables from the configuration table above, such as `GENESYS_CONNECTION_SECRET` and `SESSION_STORE_TYPE=redis`.
 3. **Configure Redis**: Navigate to the **Storage** tab in your Vercel dashboard and create a new **KV (Redis)** database. Connect it to your project, and Vercel will automatically create and link the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables.
-4. **Deploy**: Push your code to the main branch to trigger a production deployment.
+4. **Deploy**: Push your code to the main branch to trigger a production deployment. Vercel selects a Node.js 22+ runtime from the `engines` field in `package.json`.
 
 ### Genesys Cloud Configuration
 
@@ -170,4 +233,6 @@ In your Genesys Cloud organization, set up the Digital Bot Connector integration
 3. Example invocation from Inbound Message Flow:
 
 <img width="1281" height="994" alt="image" src="https://github.com/user-attachments/assets/f0d0d1d4-d95a-4a05-9825-be668433865d" />
+
+This screenshot was taken with an earlier version and shows the retired `OpenAI GPT-4.1 mini` bot. Select `OpenAI GPT-6.1 Terra` or `OpenAI GPT-6 Luna` as the **Digital Bot Name** instead. The `openai_temperature` session variable shown still works while the reasoning effort is `none`.
 

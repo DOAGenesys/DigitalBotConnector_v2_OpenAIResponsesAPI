@@ -2,8 +2,8 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { getBots } from '@/lib/bots';
 import logger from '@/lib/logger';
 
-export async function GET(request: NextRequest, context: { params: { botId: string } }) {
-  const botId = context.params.botId;
+export async function GET(request: NextRequest, context: { params: Promise<{ botId: string }> }) {
+  const { botId } = await context.params;
   logger.info(`GET /botconnector/bots/${botId}`);
 
   const bots = getBots();

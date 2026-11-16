@@ -1,0 +1,58 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# testing
+coverage/
+
+# vercel
+.vercel/
+
+# misc
+.DS_Store
+npm-debug.log*
+
+# --- secrets (never commit) ---
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+.envrc
+*.env
+.dev.vars
+.secrets/
+secrets.*
+*.secret
+*.secrets
+credentials*.json
+service-account*.json
+client_secret*.json
+token.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.ppk
+id_rsa*
+id_ed25519*
+*.kdbx
+.npmrc
+.pypirc
+.netrc
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+terraform.tfstate*
+.terraform/
+.cursor/mcp.json
+.vscode/mcp.json
+local.settings.json
+*.log

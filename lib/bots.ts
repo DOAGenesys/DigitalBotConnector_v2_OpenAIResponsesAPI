@@ -12,10 +12,10 @@ export interface GenesysBot {
 
 const bots: GenesysBot[] = [
   {
-    id: 'gpt-4.1-mini',
-    name: 'OpenAI GPT-4.1 mini',
+    id: 'gpt-6.1-terra',
+    name: 'OpenAI GPT-6.1 Terra',
     provider: 'OpenAI',
-    description: 'A powerful and fast multimodal model from OpenAI.',
+    description: 'A fast, efficient model from OpenAI for visual reasoning and clear, natural writing.',
     versions: [
       {
         version: 'latest',
@@ -25,10 +25,10 @@ const bots: GenesysBot[] = [
     ],
   },
   {
-    id: 'gpt-4.1-nano',
-    name: 'OpenAI GPT-4.1 nano',
+    id: 'gpt-6-luna',
+    name: 'OpenAI GPT-6 Luna',
     provider: 'OpenAI',
-    description: 'A highly cost efficient LLM from OpenAI.',
+    description: 'The most efficient OpenAI model, for focused, high-volume tasks.',
     versions: [
       {
         version: 'latest',
@@ -39,6 +39,12 @@ const bots: GenesysBot[] = [
   },
 ];
 
+export const FALLBACK_MODEL = bots[0].id;
+
 export function getBots(): GenesysBot[] {
   return bots;
+}
+
+export function isSupportedModel(modelId: string | undefined): modelId is string {
+  return bots.some(b => b.id === modelId);
 }

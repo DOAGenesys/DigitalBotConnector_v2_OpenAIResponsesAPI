@@ -3,7 +3,10 @@ interface Config {
   LOG_LEVEL: 'debug' | 'info' | 'warn' | 'error';
   GENESYS_CONNECTION_SECRET: string;
   DEFAULT_OPENAI_MODEL: string;
+  DEFAULT_OPENAI_REASONING_EFFORT: string;
   DEFAULT_OPENAI_TEMPERATURE: number;
+  DEFAULT_OPENAI_VERBOSITY?: string;
+  OPENAI_TIMEOUT_MS: number;
   MCP_SERVERS_CONFIG_PATH?: string;
   SESSION_STORE_TYPE: 'memory' | 'redis';
   KV_REST_API_URL?: string;
@@ -18,8 +21,11 @@ export function getConfig(): Config {
       PORT: parseInt(process.env.PORT || '3000', 10),
       LOG_LEVEL: (process.env.LOG_LEVEL || 'info') as Config['LOG_LEVEL'],
       GENESYS_CONNECTION_SECRET: process.env.GENESYS_CONNECTION_SECRET || '',
-      DEFAULT_OPENAI_MODEL: process.env.DEFAULT_OPENAI_MODEL || 'gpt-4o',
+      DEFAULT_OPENAI_MODEL: process.env.DEFAULT_OPENAI_MODEL || 'gpt-6.1-terra',
+      DEFAULT_OPENAI_REASONING_EFFORT: process.env.DEFAULT_OPENAI_REASONING_EFFORT || 'none',
       DEFAULT_OPENAI_TEMPERATURE: parseFloat(process.env.DEFAULT_OPENAI_TEMPERATURE || '0.7'),
+      DEFAULT_OPENAI_VERBOSITY: process.env.DEFAULT_OPENAI_VERBOSITY || undefined,
+      OPENAI_TIMEOUT_MS: parseInt(process.env.OPENAI_TIMEOUT_MS || '50000', 10),
       MCP_SERVERS_CONFIG_PATH: process.env.MCP_SERVERS_CONFIG_PATH,
       SESSION_STORE_TYPE: (process.env.SESSION_STORE_TYPE || 'memory') as Config['SESSION_STORE_TYPE'],
       KV_REST_API_URL: process.env.KV_REST_API_URL,

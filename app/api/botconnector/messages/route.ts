@@ -1,29 +1,35 @@
+import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getConfig } from '@/lib/config';
 import logger from '@/lib/logger';
 import { getSessionStore } from '@/lib/session-store';
-import { GenesysIncomingMessagesRequest, GenesysIncomingMessagesResponse, GenesysReplyMessage, GenesysBotState, GenesysErrorInfo } from '@/types/genesys';
-import { getBots } from '@/lib/bots';
-import fs from 'fs/promises';
-import path from 'path';
+import { loadConfiguredTools } from '@/lib/tools';
+import {
+  buildResponseCreateParams,
+  describeError,
+  mapOpenAIError,
+  mapResponseToGenesys,
+  resolveRequestSettings,
+} from '@/lib/openai';
+import { GenesysIncomingMessagesRequest, GenesysIncomingMessagesResponse } from '@/types/genesys';
 
 const config = getConfig();
-const openai = new OpenAI({ apiKey: '' });
 const sessionStore = getSessionStore();
 
-export async function POST(req: NextRequest) {
-  const body: GenesysIncomingMessagesRequest = await req.json();
-  logger.info({
-    message: 'POST /botconnector/messages received',
-    botSessionId: body.botSessionId,
-    botId: body.botId,
-    genesysConversationId: body.genesysConversationId
-  });
-  logger.debug({ message: 'Full incoming Genesys request body', body: JSON.stringify(body, null, 2) });
+function isValidConnectionSecret(received: string | null): boolean {
+  if (!received) return false;
+  const expected = Buffer.from(config.GENESYS_CONNECTION_SECRET);
+  const actual = Buffer.from(received);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
 
-  const secret = req.headers.get('GENESYS_CONNECTION_SECRET');
-  if (secret !== config.GENESYS_CONNECTION_SECRET) {
+export async function POST(req: NextRequest) {
+  if (!config.GENESYS_CONNECTION_SECRET) {
+    logger.error('GENESYS_CONNECTION_SECRET is not set; rejecting request.');
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (!isValidConnectionSecret(req.headers.get('GENESYS_CONNECTION_SECRET'))) {
     logger.warn('Invalid connection secret');
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -34,116 +40,94 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing OpenAI API key' }, { status: 400 });
   }
 
+  let body: GenesysIncomingMessagesRequest;
+  try {
+    body = await req.json();
+  } catch {
+    logger.warn('Request body is not valid JSON');
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  logger.info({
+    message: 'POST /botconnector/messages received',
+    botSessionId: body.botSessionId,
+    botId: body.botId,
+    genesysConversationId: body.genesysConversationId,
+  });
+  logger.debug({ message: 'Full incoming Genesys request body', body: JSON.stringify(body, null, 2) });
+
   try {
     const { botSessionId, inputMessage, genesysConversationId, botId, parameters, botSessionTimeout } = body;
-    const sessionKey = botSessionId || new Date().toISOString();
 
-    let previousResponseId: string | undefined;
-    if (botSessionId) {
-      previousResponseId = await sessionStore.get(sessionKey);
-      logger.debug(`Retrieved previousResponseId: ${previousResponseId}`);
-    }
-
-    const input: OpenAI.Responses.ResponseCreateParams['input'] = inputMessage.text || '';
-    logger.debug({ message: 'Processing as text-only input', text: input });
-
+    const input = inputMessage?.text || '';
     if (!input.trim()) {
-        logger.warn('Input text is empty, returning empty response to Genesys.');
-        const genesysResponse: GenesysIncomingMessagesResponse = {
-            botState: 'MoreData',
-            replyMessages: [],
-            intent: 'DefaultIntent',
-            confidence: 1.0,
-            entities: [],
-            parameters: {},
-        };
-        return NextResponse.json(genesysResponse);
+      logger.warn('Input text is empty, returning empty response to Genesys.');
+      const genesysResponse: GenesysIncomingMessagesResponse = {
+        botState: 'MoreData',
+        replyMessages: [],
+        intent: 'DefaultIntent',
+        confidence: 1.0,
+        entities: [],
+        parameters: {},
+      };
+      return NextResponse.json(genesysResponse);
     }
 
-    let model = config.DEFAULT_OPENAI_MODEL;
-    let temperature = config.DEFAULT_OPENAI_TEMPERATURE;
-    if (parameters) {
-      if (parameters.openai_model) model = parameters.openai_model;
-      if (parameters.openai_temperature) temperature = parseFloat(parameters.openai_temperature);
-    }
-    
-    if (!parameters?.openai_model) {
-      const bots = getBots();
-      const bot = bots.find(b => b.id === botId);
-      if (bot) model = bot.id;
-    }
+    const previousResponseId = botSessionId ? await sessionStore.get(botSessionId) : undefined;
+    logger.debug(`Retrieved previousResponseId: ${previousResponseId}`);
 
-    const metadata = { genesys_conversation_id: genesysConversationId };
+    const { settings, warnings: settingsWarnings } = resolveRequestSettings(botId, parameters, {
+      model: config.DEFAULT_OPENAI_MODEL,
+      reasoningEffort: config.DEFAULT_OPENAI_REASONING_EFFORT,
+      temperature: config.DEFAULT_OPENAI_TEMPERATURE,
+      verbosity: config.DEFAULT_OPENAI_VERBOSITY,
+    });
+    settingsWarnings.forEach(warning => logger.warn(warning));
 
-    let tools: OpenAI.Responses.ResponseCreateParams['tools'] = [];
-    if (config.MCP_SERVERS_CONFIG_PATH) {
-      try {
-        const mcpConfigPath = path.join(process.cwd(), config.MCP_SERVERS_CONFIG_PATH);
-        const mcpConfigFile = await fs.readFile(mcpConfigPath, 'utf-8');
-        const mcpConfigJson = JSON.parse(mcpConfigFile);
+    const tools = await loadConfiguredTools(config.MCP_SERVERS_CONFIG_PATH);
 
-        tools = mcpConfigJson.map((t: any) => ({
-          type: 'mcp' as const,
-          ...t,
-        }));
-        logger.debug('Loaded MCP tools', { count: tools?.length || 0 });
-      } catch (err) {
-        logger.error({ msg: 'Failed to load MCP config', error: (err as Error).message });
-      }
-    }
-
-    const openaiResponse = await openai.responses.create({
-      model,
+    const requestParams = buildResponseCreateParams({
+      settings,
       input,
-      previous_response_id: previousResponseId || undefined,
-      temperature,
-      metadata,
+      previousResponseId,
+      metadata: { genesys_conversation_id: genesysConversationId },
       tools,
-    }, { headers: { Authorization: `Bearer ${openaiApiKey}` } });
+    });
+    logger.debug({ message: 'Calling OpenAI Responses API', ...settings, toolCount: tools.length });
 
-    if (botSessionId && openaiResponse.id) {
+    // Genesys waits at most 60 seconds for a reply, so the client timeout and retries stay below that.
+    const openai = new OpenAI({ apiKey: openaiApiKey, timeout: config.OPENAI_TIMEOUT_MS, maxRetries: 1 });
+    const openaiResponse = await openai.responses.create(requestParams);
+
+    const result = mapResponseToGenesys(openaiResponse);
+    result.warnings.forEach(warning => logger.warn({ responseId: openaiResponse.id }, warning));
+
+    if (botSessionId && result.keepResponseId) {
       const ttl = botSessionTimeout ? botSessionTimeout * 60 : undefined;
-      await sessionStore.set(sessionKey, openaiResponse.id, ttl);
-      logger.debug(`Stored new response ID: ${openaiResponse.id} for session: ${sessionKey}, TTL: ${ttl}`);
-    }
-
-    let botState: GenesysBotState = 'MoreData';
-    let replyMessages: GenesysReplyMessage[] = [];
-    let errorInfo: GenesysErrorInfo | undefined;
-
-    if (openaiResponse.status === 'completed') {
-      const outputMessage = openaiResponse.output.find(o => o.type === 'message');
-      
-      if (outputMessage && outputMessage.content[0]?.type === 'output_text') {
-        replyMessages = [{ type: 'Text', text: outputMessage.content[0].text }];
-      }
-    } else if (openaiResponse.status === 'failed') {
-      botState = 'Failed';
-      errorInfo = { errorCode: openaiResponse.error?.code || 'unknown', errorMessage: openaiResponse.error?.message || 'Unknown error' };
-    } else {
-      botState = 'Failed';
-      errorInfo = { errorCode: 'incomplete', errorMessage: 'Response incomplete' };
+      await sessionStore.set(botSessionId, openaiResponse.id, ttl);
+      logger.debug(`Stored new response ID: ${openaiResponse.id} for session: ${botSessionId}, TTL: ${ttl}`);
     }
 
     const genesysResponse: GenesysIncomingMessagesResponse = {
-      botState,
-      replyMessages,
+      botState: result.botState,
+      replyMessages: result.replyMessages,
       intent: 'DefaultIntent',
       confidence: 1.0,
       entities: [],
       parameters: {},
-      errorInfo,
+      errorInfo: result.errorInfo,
     };
 
     logger.debug({ message: 'Sending response to Genesys', response: genesysResponse });
     return NextResponse.json(genesysResponse);
   } catch (err) {
-    logger.error({ msg: 'Error processing message', error: (err as Error).message, stack: (err as Error).stack });
+    const { httpStatus, errorInfo } = mapOpenAIError(err);
+    logger.error({ msg: 'Error processing message', ...describeError(err) });
     const errorResponse: GenesysIncomingMessagesResponse = {
       botState: 'Failed',
       replyMessages: [],
-      errorInfo: { errorCode: 'internal_error', errorMessage: (err as Error).message },
+      errorInfo,
     };
-    return NextResponse.json(errorResponse, { status: 500 });
+    return NextResponse.json(errorResponse, { status: httpStatus });
   }
 }
