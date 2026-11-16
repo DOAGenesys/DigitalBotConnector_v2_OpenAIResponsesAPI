@@ -90,7 +90,14 @@ class RedisStore implements SessionStore {
   private client: Redis;
 
   constructor() {
-    this.client = new Redis({ url: config.KV_REST_API_URL!, token: config.KV_REST_API_TOKEN! });
+    // The client's default (5 retries with exponential backoff) adds about 4 seconds per call when
+    // Redis is unreachable, which pushes replies past the Genesys Bot Response Timeout.
+    this.client = new Redis({
+      url: config.KV_REST_API_URL!,
+      token: config.KV_REST_API_TOKEN!,
+      retry: { retries: 1, backoff: () => 200 },
+      signal: () => AbortSignal.timeout(3000),
+    });
   }
 
   async get(key: string): Promise<string | undefined> {
