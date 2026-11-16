@@ -218,7 +218,7 @@ This middleware is optimized for deployment on Vercel's serverless platform.
 1. **Link Repository**: Connect your GitHub repository to a new Vercel project.
 2. **Set Environment Variables**: In the Vercel project dashboard, navigate to **Settings > Environment Variables**. Add all the necessary variables from the configuration table above, such as `GENESYS_CONNECTION_SECRET` and `SESSION_STORE_TYPE=redis`.
 3. **Configure Redis**: Navigate to the **Storage** tab in your Vercel dashboard and create a new **KV (Redis)** database. Connect it to your project, and Vercel will automatically create and link the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables.
-4. **Deploy**: Push your code to the main branch to trigger a production deployment. Vercel selects a Node.js 22+ runtime from the `engines` field in `package.json`.
+4. **Deploy**: Push your code to the main branch to trigger a production deployment. The `engines` field in `package.json` pins the runtime to Node.js 22.x, matching the project's Node.js Version setting. Change both together when you move to a newer Node.js major.
 
 ### Genesys Cloud Configuration
 
