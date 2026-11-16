@@ -61,7 +61,7 @@ export function redactSecrets(text: string): string {
  */
 export function resolveRequestSettings(
   botId: string | undefined,
-  parameters: Record<string, string> | undefined,
+  parameters: Record<string, string | undefined> | undefined,
   defaults: RequestDefaults,
 ): { settings: RequestSettings; warnings: string[] } {
   const warnings: string[] = [];
@@ -141,12 +141,14 @@ export function resolveRequestSettings(
 
 export function buildResponseCreateParams(args: {
   settings: RequestSettings;
-  input: string;
+  input: OpenAI.Responses.ResponseCreateParams['input'];
   previousResponseId?: string;
   metadata: Record<string, string>;
   tools: OpenAI.Responses.Tool[];
+  instructions?: string;
+  promptCacheKey?: string;
 }): OpenAI.Responses.ResponseCreateParamsNonStreaming {
-  const { settings, input, previousResponseId, metadata, tools } = args;
+  const { settings, input, previousResponseId, metadata, tools, instructions, promptCacheKey } = args;
   return {
     model: settings.model,
     input,
@@ -157,8 +159,43 @@ export function buildResponseCreateParams(args: {
     ...(settings.temperature !== undefined ? { temperature: settings.temperature } : {}),
     ...(settings.verbosity ? { text: { verbosity: settings.verbosity } } : {}),
     ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-    ...(tools.length > 0 ? { tools } : {}),
+    // Data Actions run one at a time, in the order the model asks for them.
+    ...(tools.length > 0 ? { tools, parallel_tool_calls: false } : {}),
+    ...(instructions ? { instructions } : {}),
+    ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
   };
+}
+
+/**
+ * A one-off question about the conversation so far (summary, task check). It answers the
+ * model's pending function calls first, because the API rejects a continuation that leaves
+ * them unanswered.
+ */
+export function buildFollowUpQuestionParams(args: {
+  model: string;
+  question: string;
+  previousResponseId?: string;
+  pendingToolOutputs: OpenAI.Responses.ResponseInputItem.FunctionCallOutput[];
+  metadata: Record<string, string>;
+}): OpenAI.Responses.ResponseCreateParamsNonStreaming {
+  const { model, question, previousResponseId, pendingToolOutputs, metadata } = args;
+  return {
+    model,
+    input: [...pendingToolOutputs, { role: 'user', content: question }],
+    store: false,
+    reasoning: { effort: 'none' },
+    temperature: 0,
+    metadata,
+    ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+  };
+}
+
+export function getFunctionCalls(
+  output: OpenAI.Responses.ResponseOutputItem[],
+): OpenAI.Responses.ResponseFunctionToolCall[] {
+  return output.filter(
+    (item): item is OpenAI.Responses.ResponseFunctionToolCall => item.type === 'function_call',
+  );
 }
 
 /**
